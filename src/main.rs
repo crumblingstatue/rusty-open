@@ -163,7 +163,9 @@ fn open(arg: &OsStr) {
                 }
             }
             None => {
-                MessageDialog::new().set_description("No default app could be determined");
+                MessageDialog::new()
+                    .set_description("No default app could be determined")
+                    .show();
             }
         }
     }
