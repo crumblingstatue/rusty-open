@@ -14,7 +14,7 @@ use {
 mod dbg_box;
 
 fn is_string_url(str: &str) -> bool {
-    str.starts_with("file://")
+    str.starts_with("file://") || str.starts_with("http://") || str.starts_with("https://")
 }
 
 fn is_url(arg: &OsStr) -> bool {
