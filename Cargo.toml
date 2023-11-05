@@ -9,3 +9,8 @@ edition = "2021"
 dirs = "5.0.1"
 rfd = "0.12.1"
 thiserror = "1.0.50"
+
+[profile.release]
+strip = true
+lto = "thin"
+panic = "abort"
