@@ -3,7 +3,7 @@ use {
     std::{
         collections::HashMap,
         ffi::{OsStr, OsString},
-        path::Path,
+        path::{Path, PathBuf},
         process::Command,
         str::Utf8Error,
     },
@@ -113,18 +113,17 @@ fn open(arg: &OsStr) {
                 let mut to_exec = &default;
                 let parsed_args;
                 let parsed_exec;
+                let mut appfile_path = PathBuf::default();
                 if default.ends_with(".desktop") {
-                    let desktop_map = match parse_desktop_file(
-                        Path::new("/usr/share/applications").join(&default),
-                    ) {
+                    appfile_path = Path::new("/usr/share/applications").join(&default);
+                    let desktop_map = match parse_desktop_file(&appfile_path) {
                         Ok(map) => map,
                         Err(_) => {
-                            match parse_desktop_file(
-                                dirs::data_dir()
-                                    .unwrap()
-                                    .join("applications")
-                                    .join(&default),
-                            ) {
+                            appfile_path = dirs::data_dir()
+                                .unwrap()
+                                .join("applications")
+                                .join(&default);
+                            match parse_desktop_file(&appfile_path) {
                                 Ok(map) => map,
                                 Err(_) => {
                                     MessageDialog::new()
@@ -146,8 +145,9 @@ fn open(arg: &OsStr) {
                 let mut ok = true;
                 if debug {
                     let msg = format!(
-                        "Arg: {arg}\nMime: {mime}\nDefault: {default}\nExecutable: {to_exec}\nArgs: {args:?}",
-                        arg = arg.to_string_lossy()
+                        "Arg: {arg}\nMime: {mime}\nApp file: {appfile_path}\nExecutable: {to_exec}\nArgs: {args:?}",
+                        arg = arg.to_string_lossy(),
+                        appfile_path = appfile_path.display()
                     );
                     if MessageDialog::new()
                         .set_description(msg)
