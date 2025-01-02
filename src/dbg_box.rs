@@ -1,4 +1,3 @@
-#[allow(dead_code)]
 pub fn dbg_box_show(msg: &str) {
     rfd::MessageDialog::new()
         .set_title("dbg!")
@@ -7,7 +6,6 @@ pub fn dbg_box_show(msg: &str) {
 }
 
 /// Used for debugging in cases where we're not connected to a terminal
-#[allow(unused_macros)]
 macro_rules! dbg_box {
     () => {
         dbg_box_show(&format!("[{}:{}]", file!(), line!()))
