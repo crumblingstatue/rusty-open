@@ -11,6 +11,7 @@ rfd.version = "0.15.1"
 rfd.default-features = false
 rfd.features = ["gtk3"]
 thiserror = "2.0.9"
+detect-desktop-environment = "1.1.0"
 
 [profile.release]
 strip = true

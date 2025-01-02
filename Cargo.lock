@@ -62,6 +62,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "baf1de4339761588bc0619e3cbc0120ee582ebb74b53b4efbf79117bd2da40fd"
 
 [[package]]
+name = "detect-desktop-environment"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cf27a1bbe31ac901a2350a6316b1f7056067118abe6bf1ff015d5950ac5e3eb3"
+
+[[package]]
 name = "dirs"
 version = "5.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -438,6 +444,7 @@ dependencies = [
 name = "rusty-open"
 version = "0.1.0"
 dependencies = [
+ "detect-desktop-environment",
  "dirs",
  "rfd",
  "thiserror 2.0.9",

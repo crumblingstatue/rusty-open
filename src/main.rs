@@ -1,4 +1,5 @@
 use {
+    detect_desktop_environment::DesktopEnvironment,
     rfd::{MessageDialog, MessageDialogResult},
     std::{
         collections::HashMap,
@@ -32,9 +33,35 @@ enum XdgQueryError {
     Empty,
 }
 
-fn query_mime(arg: &OsStr) -> Result<String, XdgQueryError> {
+fn query_mime(arg: &OsStr, de: Option<DesktopEnvironment>) -> Result<String, XdgQueryError> {
+    match de {
+        Some(DesktopEnvironment::Lxqt) => query_mime_lxqt(arg),
+        _ => query_mime_xdg(arg),
+    }
+}
+
+fn query_mime_xdg(arg: &OsStr) -> Result<String, XdgQueryError> {
     let out = Command::new("xdg-mime")
         .args(["query".as_ref(), "filetype".as_ref(), arg])
+        .output()
+        .unwrap()
+        .stdout;
+    match std::str::from_utf8(&out) {
+        Ok(s) => {
+            let trimmed = s.trim();
+            if trimmed.is_empty() {
+                Err(XdgQueryError::Empty)
+            } else {
+                Ok(trimmed.to_string())
+            }
+        }
+        Err(e) => Err(XdgQueryError::InvalidUtf8(e)),
+    }
+}
+
+fn query_mime_lxqt(arg: &OsStr) -> Result<String, XdgQueryError> {
+    let out = Command::new("qtxdg-mat")
+        .args(["mimetype".as_ref(), arg])
         .output()
         .unwrap()
         .stdout;
@@ -83,14 +110,14 @@ fn open_with(command: impl AsRef<OsStr>, args: &[impl AsRef<OsStr>]) {
     }
 }
 
-fn open(arg: &OsStr) {
+fn open(arg: &OsStr, de: Option<DesktopEnvironment>) {
     //let debug = matches!(std::env::var("RUSTY_OPEN_DEBUG").as_deref(), Ok("hello"));
     let debug = true; // During development
     let is_url = is_url(arg);
     if is_url {
         open_with("firefox", &[arg]);
     } else {
-        let mime = match query_mime(arg) {
+        let mime = match query_mime(arg, de) {
             Ok(mime) => mime,
             Err(e) => {
                 MessageDialog::new()
@@ -145,9 +172,10 @@ fn open(arg: &OsStr) {
                 let mut ok = true;
                 if debug {
                     let msg = format!(
-                        "Arg: {arg}\nMime: {mime}\nApp file: {appfile_path}\nExecutable: {to_exec}\nArgs: {args:?}",
+                        "Arg: {arg}\nDE: {de}\nMime: {mime}\nApp file: {appfile_path}\nExecutable: {to_exec}\nArgs: {args:?}",
                         arg = arg.to_string_lossy(),
-                        appfile_path = appfile_path.display()
+                        appfile_path = appfile_path.display(),
+                        de = de_opt_str(de),
                     );
                     if MessageDialog::new()
                         .set_description(msg)
@@ -164,10 +192,43 @@ fn open(arg: &OsStr) {
             }
             None => {
                 MessageDialog::new()
-                    .set_description("No default app could be determined")
+                    .set_description(format!(
+                        "No default app could be determined for mime {mime}"
+                    ))
                     .show();
             }
         }
+    }
+}
+
+fn de_opt_str(de: Option<DesktopEnvironment>) -> &'static str {
+    match de {
+        Some(de) => match de {
+            DesktopEnvironment::Cinnamon => "Cinnamon",
+            DesktopEnvironment::Cosmic => "Cosmic",
+            DesktopEnvironment::Dde => "Dde",
+            DesktopEnvironment::Ede => "Ede",
+            DesktopEnvironment::Endless => "Endless",
+            DesktopEnvironment::Enlightenment => "Enlightenment",
+            DesktopEnvironment::Gnome => "Gnome",
+            DesktopEnvironment::Hyprland => "Hyprland",
+            DesktopEnvironment::Kde => "KDE",
+            DesktopEnvironment::Lxde => "LXDE",
+            DesktopEnvironment::Lxqt => "LXQt",
+            DesktopEnvironment::MacOs => "Mac OS",
+            DesktopEnvironment::Mate => "Mate",
+            DesktopEnvironment::Old => "Old",
+            DesktopEnvironment::Pantheon => "Pantheon",
+            DesktopEnvironment::Razor => "Razor",
+            DesktopEnvironment::Rox => "Rox",
+            DesktopEnvironment::Sway => "Sway",
+            DesktopEnvironment::Tde => "Tde",
+            DesktopEnvironment::Unity => "Unity",
+            DesktopEnvironment::Windows => "Windows",
+            DesktopEnvironment::Xfce => "Xfce",
+            _ => "TODO",
+        },
+        None => "<Could not detect desktop environment>",
     }
 }
 
@@ -223,8 +284,9 @@ fn parse_desktop_file(path: impl AsRef<Path>) -> Result<DesktopMap, std::io::Err
 }
 
 fn main() {
+    let de = DesktopEnvironment::detect();
     match std::env::args_os().nth(1) {
-        Some(arg) => open(&arg),
+        Some(arg) => open(&arg, de),
         None => {
             MessageDialog::new()
                 .set_title("Rusty-open")
