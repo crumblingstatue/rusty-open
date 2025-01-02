@@ -13,6 +13,8 @@ use {
 
 #[macro_use]
 mod dbg_box;
+mod generic_xdg;
+mod qt_xdg;
 
 fn is_string_url(str: &str) -> bool {
     str.starts_with("file://") || str.starts_with("http://") || str.starts_with("https://")
@@ -33,67 +35,24 @@ enum XdgQueryError {
     Empty,
 }
 
-fn query_mime(arg: &OsStr, de: Option<DesktopEnvironment>) -> Result<String, XdgQueryError> {
-    match de {
-        Some(DesktopEnvironment::Lxqt) => query_mime_lxqt(arg),
-        _ => query_mime_xdg(arg),
-    }
+trait QueryExt {
+    fn query_mime(&self, arg: &OsStr) -> Result<String, XdgQueryError>;
+    fn query_default(&self, mime: &str) -> Result<String, XdgQueryError>;
 }
 
-fn query_mime_xdg(arg: &OsStr) -> Result<String, XdgQueryError> {
-    let out = Command::new("xdg-mime")
-        .args(["query".as_ref(), "filetype".as_ref(), arg])
-        .output()
-        .unwrap()
-        .stdout;
-    match std::str::from_utf8(&out) {
-        Ok(s) => {
-            let trimmed = s.trim();
-            if trimmed.is_empty() {
-                Err(XdgQueryError::Empty)
-            } else {
-                Ok(trimmed.to_string())
-            }
+impl QueryExt for Option<DesktopEnvironment> {
+    fn query_mime(&self, arg: &OsStr) -> Result<String, XdgQueryError> {
+        match self {
+            Some(DesktopEnvironment::Lxqt) => qt_xdg::query_mime(arg),
+            _ => generic_xdg::query_mime_xdg(arg),
         }
-        Err(e) => Err(XdgQueryError::InvalidUtf8(e)),
     }
-}
 
-fn query_mime_lxqt(arg: &OsStr) -> Result<String, XdgQueryError> {
-    let out = Command::new("qtxdg-mat")
-        .args(["mimetype".as_ref(), arg])
-        .output()
-        .unwrap()
-        .stdout;
-    match std::str::from_utf8(&out) {
-        Ok(s) => {
-            let trimmed = s.trim();
-            if trimmed.is_empty() {
-                Err(XdgQueryError::Empty)
-            } else {
-                Ok(trimmed.to_string())
-            }
+    fn query_default(&self, mime: &str) -> Result<String, XdgQueryError> {
+        match self {
+            Some(DesktopEnvironment::Lxqt) => qt_xdg::query_default(mime),
+            _ => generic_xdg::query_default(mime),
         }
-        Err(e) => Err(XdgQueryError::InvalidUtf8(e)),
-    }
-}
-
-fn query_default(mime: &str) -> Result<String, XdgQueryError> {
-    let out = Command::new("xdg-mime")
-        .args(["query", "default", mime])
-        .output()
-        .unwrap()
-        .stdout;
-    match std::str::from_utf8(&out) {
-        Ok(s) => {
-            let trimmed = s.trim();
-            if trimmed.is_empty() {
-                Err(XdgQueryError::Empty)
-            } else {
-                Ok(trimmed.to_string())
-            }
-        }
-        Err(e) => Err(XdgQueryError::InvalidUtf8(e)),
     }
 }
 
@@ -117,7 +76,7 @@ fn open(arg: &OsStr, de: Option<DesktopEnvironment>) {
     if is_url {
         open_with("firefox", &[arg]);
     } else {
-        let mime = match query_mime(arg, de) {
+        let mime = match de.query_mime(arg) {
             Ok(mime) => mime,
             Err(e) => {
                 MessageDialog::new()
@@ -126,7 +85,7 @@ fn open(arg: &OsStr, de: Option<DesktopEnvironment>) {
                 return;
             }
         };
-        let default = match query_default(&mime) {
+        let default = match de.query_default(&mime) {
             Ok(def) => Some(def),
             Err(XdgQueryError::InvalidUtf8(e)) => {
                 dbg_box!(e);
