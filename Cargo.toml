@@ -7,8 +7,10 @@ edition = "2021"
 
 [dependencies]
 dirs = "5.0.1"
-rfd = "0.12.1"
-thiserror = "1.0.50"
+rfd.version = "0.15.1"
+rfd.default-features = false
+rfd.features = ["gtk3"]
+thiserror = "2.0.9"
 
 [profile.release]
 strip = true
