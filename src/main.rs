@@ -2,19 +2,20 @@ use {
     detect_desktop_environment::DesktopEnvironment,
     rfd::{MessageDialog, MessageDialogResult},
     std::{
-        collections::HashMap,
-        ffi::{OsStr, OsString},
+        ffi::OsStr,
         path::{Path, PathBuf},
         process::Command,
         str::Utf8Error,
     },
     thiserror::Error,
+    xdg_desktop_file::{args_from_exec_string, parse_desktop_file},
 };
 
 #[macro_use]
 mod dbg_box;
 mod generic_xdg;
 mod qt_xdg;
+mod xdg_desktop_file;
 
 fn is_string_url(str: &str) -> bool {
     str.starts_with("file://") || str.starts_with("http://") || str.starts_with("https://")
@@ -189,57 +190,6 @@ fn de_opt_str(de: Option<DesktopEnvironment>) -> &'static str {
         },
         None => "<Could not detect desktop environment>",
     }
-}
-
-fn args_from_exec_string(exec: &str, arg: &OsStr) -> (String, Vec<OsString>) {
-    let mut tokens = exec.split_whitespace();
-    let exec = tokens.next().unwrap().to_string();
-    let args = tokens
-        .map(|tok| {
-            if tok == "%U" || tok == "%u" || tok == "%f" {
-                arg.to_owned()
-            } else {
-                tok.into()
-            }
-        })
-        .collect();
-    (exec, args)
-}
-
-type DesktopMap = HashMap<String, String>;
-
-enum ParseStatus {
-    // Initial status, trying to find desktop entry group
-    Init,
-    // Parsing desktop entry
-    DesktopEntry,
-}
-
-fn parse_desktop_file(path: impl AsRef<Path>) -> Result<DesktopMap, std::io::Error> {
-    // .desktop files are UTF-8 according to spec
-    let mut status = ParseStatus::Init;
-    let mut map = HashMap::new();
-    let raw = std::fs::read_to_string(path)?;
-    for line in raw.lines() {
-        match status {
-            ParseStatus::Init => {
-                if line.trim() == "[Desktop Entry]" {
-                    status = ParseStatus::DesktopEntry;
-                }
-            }
-            ParseStatus::DesktopEntry => {
-                // Another group is starting, we're not interested
-                if line.trim().starts_with('[') {
-                    return Ok(map);
-                }
-                // Collect key-value pairs
-                if let Some((k, v)) = line.split_once('=') {
-                    map.insert(k.trim().to_string(), v.trim().to_string());
-                }
-            }
-        }
-    }
-    Ok(map)
 }
 
 fn main() {
