@@ -124,9 +124,15 @@ fn open(arg: &OsStr, de: Option<DesktopEnvironment>) {
                         }
                     };
                     if let Some(exec) = desktop_map.get("Exec") {
-                        (parsed_exec, parsed_args) = args_from_exec_string(exec, arg);
-                        args = &parsed_args[..];
-                        to_exec = &parsed_exec;
+                        if let Some(tup) = args_from_exec_string(exec, arg) {
+                            (parsed_exec, parsed_args) = tup;
+                            args = &parsed_args[..];
+                            to_exec = &parsed_exec;
+                        } else {
+                            MessageDialog::new()
+                                .set_description("Invalid Exec string")
+                                .show();
+                        }
                     }
                 }
                 let mut ok = true;

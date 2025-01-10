@@ -4,10 +4,14 @@ use std::{
     path::Path,
 };
 
-pub fn args_from_exec_string(exec: &str, arg: &OsStr) -> (String, Vec<OsString>) {
-    let mut tokens = exec.split_whitespace();
-    let exec = tokens.next().unwrap().to_string();
+pub fn args_from_exec_string(exec: &str, arg: &OsStr) -> Option<(String, Vec<OsString>)> {
+    let mut tokens = shlex::split(exec)?;
+    if tokens.is_empty() {
+        return None;
+    }
+    let exec = tokens.remove(0);
     let args = tokens
+        .into_iter()
         .map(|tok| {
             if tok == "%U" || tok == "%u" || tok == "%f" {
                 arg.to_owned()
@@ -16,7 +20,7 @@ pub fn args_from_exec_string(exec: &str, arg: &OsStr) -> (String, Vec<OsString>)
             }
         })
         .collect();
-    (exec, args)
+    Some((exec, args))
 }
 
 type DesktopMap = HashMap<String, String>;
