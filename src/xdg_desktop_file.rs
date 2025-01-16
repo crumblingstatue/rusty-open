@@ -13,7 +13,7 @@ pub fn args_from_exec_string(exec: &str, arg: &OsStr) -> Option<(String, Vec<OsS
     let args = tokens
         .into_iter()
         .map(|tok| {
-            if tok == "%U" || tok == "%u" || tok == "%f" {
+            if tok == "%U" || tok == "%u" || tok == "%f" || tok == "%F" {
                 arg.to_owned()
             } else {
                 tok.into()
