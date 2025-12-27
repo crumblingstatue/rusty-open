@@ -50,6 +50,7 @@ impl QueryExt for Option<DesktopEnvironment> {
 fn fallback_default(mime: &str) -> Option<&'static str> {
     Some(match mime {
         "application/vnd.microsoft.portable-executable" => "wine",
+        "x-scheme-handler/file" => "firefox",
         _ => return None,
     })
 }
