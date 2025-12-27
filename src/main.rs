@@ -61,17 +61,17 @@ fn open_with(command: impl AsRef<OsStr>, args: &[impl AsRef<OsStr>]) {
 }
 
 fn open(arg: &OsStr, de: Option<DesktopEnvironment>) {
-    let mut is_url = false;
+    let mut url_mime = None;
     if let Some(text) = arg.to_str()
         && let Ok(url) = Url::parse(text)
     {
-        dbg!(url.scheme());
-        is_url = true;
+        let scheme = url.scheme();
+        url_mime = Some(format!("x-scheme-handler/{scheme}"));
     }
-    if is_url {
-        open_with("firefox", &[arg]);
+    let mime = if let Some(url_mime) = url_mime {
+        url_mime
     } else {
-        let mime = match de.query_mime(arg) {
+        match de.query_mime(arg) {
             Ok(mime) => mime,
             Err(e) => {
                 MessageDialog::new()
@@ -79,82 +79,82 @@ fn open(arg: &OsStr, de: Option<DesktopEnvironment>) {
                     .show();
                 return;
             }
-        };
-        let default = match de.query_default(&mime) {
-            Ok(def) => Some(def),
-            Err(XdgQueryError::InvalidUtf8(e)) => {
-                dbg_box!(e);
-                return;
-            }
-            Err(XdgQueryError::Empty) => fallback_default(&mime).map(|s| s.to_string()),
-        };
-        match default {
-            Some(default) => {
-                let mut args = &[arg.to_owned()][..];
-                let mut to_exec = &default;
-                let parsed_args;
-                let parsed_exec;
-                let mut appfile_path = PathBuf::default();
-                if default.ends_with(".desktop") {
-                    appfile_path = Path::new("/usr/share/applications").join(&default);
-                    let desktop_map = match parse_desktop_file(&appfile_path) {
-                        Ok(map) => map,
-                        Err(_) => {
-                            appfile_path = dirs::data_dir()
-                                .unwrap()
-                                .join("applications")
-                                .join(&default);
-                            match parse_desktop_file(&appfile_path) {
-                                Ok(map) => map,
-                                Err(_) => {
-                                    MessageDialog::new()
-                                        .set_description(format!(
-                                            "Could not find matching .desktop file for {default}"
-                                        ))
-                                        .show();
-                                    return;
-                                }
+        }
+    };
+    let default = match de.query_default(&mime) {
+        Ok(def) => Some(def),
+        Err(XdgQueryError::InvalidUtf8(e)) => {
+            dbg_box!(e);
+            return;
+        }
+        Err(XdgQueryError::Empty) => fallback_default(&mime).map(|s| s.to_string()),
+    };
+    match default {
+        Some(default) => {
+            let mut args = &[arg.to_owned()][..];
+            let mut to_exec = &default;
+            let parsed_args;
+            let parsed_exec;
+            let mut appfile_path = PathBuf::default();
+            if default.ends_with(".desktop") {
+                appfile_path = Path::new("/usr/share/applications").join(&default);
+                let desktop_map = match parse_desktop_file(&appfile_path) {
+                    Ok(map) => map,
+                    Err(_) => {
+                        appfile_path = dirs::data_dir()
+                            .unwrap()
+                            .join("applications")
+                            .join(&default);
+                        match parse_desktop_file(&appfile_path) {
+                            Ok(map) => map,
+                            Err(_) => {
+                                MessageDialog::new()
+                                    .set_description(format!(
+                                        "Could not find matching .desktop file for {default}"
+                                    ))
+                                    .show();
+                                return;
                             }
                         }
-                    };
-                    if let Some(exec) = desktop_map.get("Exec") {
-                        if let Some(tup) = args_from_exec_string(exec, arg) {
-                            (parsed_exec, parsed_args) = tup;
-                            args = &parsed_args[..];
-                            to_exec = &parsed_exec;
-                        } else {
-                            MessageDialog::new()
-                                .set_description("Invalid Exec string")
-                                .show();
-                        }
+                    }
+                };
+                if let Some(exec) = desktop_map.get("Exec") {
+                    if let Some(tup) = args_from_exec_string(exec, arg) {
+                        (parsed_exec, parsed_args) = tup;
+                        args = &parsed_args[..];
+                        to_exec = &parsed_exec;
+                    } else {
+                        MessageDialog::new()
+                            .set_description("Invalid Exec string")
+                            .show();
                     }
                 }
-                let mut ok = true;
-                let msg = format!(
-                    "Arg: {arg}\nDE: {de}\nMime: {mime}\nApp file: {appfile_path}\nExecutable: {to_exec}\nArgs: {args:?}",
-                    arg = arg.to_string_lossy(),
-                    appfile_path = appfile_path.display(),
-                    de = de_opt_str(de),
-                );
-                if MessageDialog::new()
-                    .set_description(msg)
-                    .set_buttons(rfd::MessageButtons::OkCancel)
-                    .show()
-                    == MessageDialogResult::Cancel
-                {
-                    ok = false;
-                }
-                if ok {
-                    open_with(to_exec, args);
-                }
             }
-            None => {
-                MessageDialog::new()
-                    .set_description(format!(
-                        "No default app could be determined for mime {mime}"
-                    ))
-                    .show();
+            let mut ok = true;
+            let msg = format!(
+                "Arg: {arg}\nDE: {de}\nMime: {mime}\nApp file: {appfile_path}\nExecutable: {to_exec}\nArgs: {args:?}",
+                arg = arg.to_string_lossy(),
+                appfile_path = appfile_path.display(),
+                de = de_opt_str(de),
+            );
+            if MessageDialog::new()
+                .set_description(msg)
+                .set_buttons(rfd::MessageButtons::OkCancel)
+                .show()
+                == MessageDialogResult::Cancel
+            {
+                ok = false;
             }
+            if ok {
+                open_with(to_exec, args);
+            }
+        }
+        None => {
+            MessageDialog::new()
+                .set_description(format!(
+                    "No default app could be determined for mime {mime}"
+                ))
+                .show();
         }
     }
 }
