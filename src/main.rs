@@ -61,8 +61,6 @@ fn open_with(command: impl AsRef<OsStr>, args: &[impl AsRef<OsStr>]) {
 }
 
 fn open(arg: &OsStr, de: Option<DesktopEnvironment>) {
-    //let debug = matches!(std::env::var("RUSTY_OPEN_DEBUG").as_deref(), Ok("hello"));
-    let debug = true; // During development
     let mut is_url = false;
     if let Some(text) = arg.to_str()
         && let Ok(url) = Url::parse(text)
@@ -132,21 +130,19 @@ fn open(arg: &OsStr, de: Option<DesktopEnvironment>) {
                     }
                 }
                 let mut ok = true;
-                if debug {
-                    let msg = format!(
-                        "Arg: {arg}\nDE: {de}\nMime: {mime}\nApp file: {appfile_path}\nExecutable: {to_exec}\nArgs: {args:?}",
-                        arg = arg.to_string_lossy(),
-                        appfile_path = appfile_path.display(),
-                        de = de_opt_str(de),
-                    );
-                    if MessageDialog::new()
-                        .set_description(msg)
-                        .set_buttons(rfd::MessageButtons::OkCancel)
-                        .show()
-                        == MessageDialogResult::Cancel
-                    {
-                        ok = false;
-                    }
+                let msg = format!(
+                    "Arg: {arg}\nDE: {de}\nMime: {mime}\nApp file: {appfile_path}\nExecutable: {to_exec}\nArgs: {args:?}",
+                    arg = arg.to_string_lossy(),
+                    appfile_path = appfile_path.display(),
+                    de = de_opt_str(de),
+                );
+                if MessageDialog::new()
+                    .set_description(msg)
+                    .set_buttons(rfd::MessageButtons::OkCancel)
+                    .show()
+                    == MessageDialogResult::Cancel
+                {
+                    ok = false;
                 }
                 if ok {
                     open_with(to_exec, args);
