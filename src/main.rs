@@ -8,6 +8,7 @@ use {
         str::Utf8Error,
     },
     thiserror::Error,
+    url::Url,
     xdg_desktop_file::{args_from_exec_string, parse_desktop_file},
 };
 
@@ -16,17 +17,6 @@ mod dbg_box;
 mod generic_xdg;
 mod qt_xdg;
 mod xdg_desktop_file;
-
-fn is_string_url(str: &str) -> bool {
-    str.starts_with("file://") || str.starts_with("http://") || str.starts_with("https://")
-}
-
-fn is_url(arg: &OsStr) -> bool {
-    match arg.to_str() {
-        Some(str) => is_string_url(str),
-        None => false,
-    }
-}
 
 #[derive(Error, Debug)]
 enum XdgQueryError {
@@ -73,7 +63,13 @@ fn open_with(command: impl AsRef<OsStr>, args: &[impl AsRef<OsStr>]) {
 fn open(arg: &OsStr, de: Option<DesktopEnvironment>) {
     //let debug = matches!(std::env::var("RUSTY_OPEN_DEBUG").as_deref(), Ok("hello"));
     let debug = true; // During development
-    let is_url = is_url(arg);
+    let mut is_url = false;
+    if let Some(text) = arg.to_str()
+        && let Ok(url) = Url::parse(text)
+    {
+        dbg!(url.scheme());
+        is_url = true;
+    }
     if is_url {
         open_with("firefox", &[arg]);
     } else {
