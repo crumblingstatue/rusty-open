@@ -427,7 +427,8 @@ fn main() {
                     if content_w > current_w || content_h > current_h {
                         // Some horizontal padding seems to be needed
                         let new_w = content_w + 24;
-                        let new_h = content_h;
+                        // Sometimes also vertical padding seems to be needed, to a lesser degree
+                        let new_h = content_h + 12;
                         // TODO: Better limit than magic number
                         if new_w < 1280 {
                             rw.recreate(
