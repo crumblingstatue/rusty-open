@@ -57,13 +57,15 @@ impl QueryExt for Option<DesktopEnvironment> {
 
 fn open(arg: &OsStr, de: Option<DesktopEnvironment>) -> Status {
     let mut url_mime = None;
+    let mut url_path = String::new();
     if let Some(text) = arg.to_str()
         && let Ok(url) = Url::parse(text)
     {
         let scheme = url.scheme();
+        url_path = url.path().to_string();
         url_mime = Some(format!("x-scheme-handler/{scheme}"));
     }
-    let mime = if let Some(url_mime) = url_mime {
+    let mut mime = if let Some(url_mime) = url_mime {
         url_mime
     } else {
         match de.query_mime(arg) {
@@ -73,6 +75,17 @@ fn open(arg: &OsStr, de: Option<DesktopEnvironment>) -> Status {
             }
         }
     };
+    // Special handling for `file://` URLs
+    if mime == "x-scheme-handler/file" {
+        match de.query_mime(url_path.as_ref()) {
+            Ok(path_mime) => {
+                mime = path_mime;
+            }
+            Err(e) => {
+                return Status::XdgQueryError(e);
+            }
+        }
+    }
     let default = match de.query_default(&mime) {
         Ok(def) => Some(def),
         Err(XdgQueryError::Empty) => {
