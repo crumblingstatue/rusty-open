@@ -54,14 +54,6 @@ impl QueryExt for Option<DesktopEnvironment> {
     }
 }
 
-fn fallback_default(mime: &str) -> Option<&'static str> {
-    Some(match mime {
-        "application/vnd.microsoft.portable-executable" => "wine",
-        "x-scheme-handler/file" => "firefox",
-        _ => return None,
-    })
-}
-
 fn open(arg: &OsStr, de: Option<DesktopEnvironment>) -> Status {
     let mut url_mime = None;
     if let Some(text) = arg.to_str()
@@ -82,7 +74,12 @@ fn open(arg: &OsStr, de: Option<DesktopEnvironment>) -> Status {
     };
     let default = match de.query_default(&mime) {
         Ok(def) => Some(def),
-        Err(XdgQueryError::Empty) => fallback_default(&mime).map(|s| s.to_string()),
+        Err(XdgQueryError::Empty) => {
+            return Status::CouldntDetermineDefault {
+                arg: arg.to_owned(),
+                mime,
+            };
+        }
         Err(e) => {
             return Status::XdgQueryError(e);
         }
@@ -130,7 +127,10 @@ fn open(arg: &OsStr, de: Option<DesktopEnvironment>) -> Status {
                 args: args.to_vec(),
             }
         }
-        None => Status::CouldntDetermineDefault { mime },
+        None => Status::CouldntDetermineDefault {
+            arg: arg.to_owned(),
+            mime,
+        },
     }
 }
 
@@ -171,6 +171,7 @@ enum Status {
     DesktopFileParseError(std::io::Error),
     InvalidExecString(String),
     CouldntDetermineDefault {
+        arg: OsString,
         mime: String,
     },
     PromptExec {
@@ -201,6 +202,7 @@ fn main() {
     if let Some(arg) = std::env::args_os().nth(1) {
         status = open(&arg, de);
     }
+    let mut fallback_exec_string = String::new();
     while rw.is_open() {
         while let Some(ev) = rw.poll_event() {
             sf_egui.add_event(&ev);
@@ -217,108 +219,137 @@ fn main() {
         }
         let di = sf_egui
             .run(&mut rw, |rw, ctx| {
-                egui::CentralPanel::default().show(ctx, |ui| match &status {
-                    Status::NoArgs => {
-                        ui.label(format!("Rusty-open running on {}.", de_opt_str(de)));
-                        ui.label("No arguments provided. Nothing to do.");
-                        ui.vertical_centered(|ui| {
-                            if ui.button("Okay then").clicked() {
-                                rw.close();
-                            }
-                        });
-                    }
-                    Status::XdgQueryError(xdg_query_error) => {
-                        ui.vertical_centered(|ui| {
-                            ui.heading("XDG Query error");
-                            ui.label(format!("{xdg_query_error}"));
-                            if ui.button("Ok").clicked() {
-                                rw.close();
-                            }
-                        });
-                    }
-                    Status::DesktopFileParseError(error) => {
-                        ui.heading("Desktop file parse error");
-                        ui.code(error.to_string());
-                    }
-                    Status::InvalidExecString(s) => {
-                        ui.heading("Invalid exec string");
-                        ui.code(s);
-                    }
-                    Status::CouldntDetermineDefault { mime } => {
-                        ui.heading("Couldn't determine default for mime");
-                        ui.code(mime);
-                    }
-                    Status::ExecError(err) => {
-                        ui.heading("Exec error");
-                        ui.code(err.to_string());
-                    }
-                    Status::PromptExec {
-                        arg,
-                        de,
-                        mime,
-                        appfile_path,
-                        to_exec,
-                        args,
-                    } => {
-                        let mut err = None;
-                        egui::Grid::new("info_grid").show(ui, |ui| {
-                            ui.label("xdg-open arg");
-                            ui.code(arg.display().to_string());
-                            ui.end_row();
-                            ui.label("Detected DE");
-                            ui.label(de_opt_str(*de));
-                            ui.end_row();
-                            ui.label("File mime type");
-                            ui.code(mime);
-                            ui.end_row();
-                            ui.label(".desktop file");
-                            ui.code(appfile_path.display().to_string());
-                            ui.end_row();
-                            ui.label("Executable");
-                            ui.code(to_exec);
-                            ui.end_row();
-                            ui.label("arguments");
-                            ui.end_row();
-                        });
-                        ui.indent("args_indent", |ui| {
-                            for arg in args {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    match &status {
+                        Status::NoArgs => {
+                            ui.label(format!("Rusty-open running on {}.", de_opt_str(de)));
+                            ui.label("No arguments provided. Nothing to do.");
+                            ui.vertical_centered(|ui| {
+                                if ui.button("Okay then").clicked() {
+                                    rw.close();
+                                }
+                            });
+                        }
+                        Status::XdgQueryError(xdg_query_error) => {
+                            ui.vertical_centered(|ui| {
+                                ui.heading("XDG Query error");
+                                ui.label(format!("{xdg_query_error}"));
+                                if ui.button("Ok").clicked() {
+                                    rw.close();
+                                }
+                            });
+                        }
+                        Status::DesktopFileParseError(error) => {
+                            ui.heading("Desktop file parse error");
+                            ui.code(error.to_string());
+                        }
+                        Status::InvalidExecString(s) => {
+                            ui.heading("Invalid exec string");
+                            ui.code(s);
+                        }
+                        Status::CouldntDetermineDefault { arg, mime } => {
+                            ui.heading("Couldn't determine default application");
+                            let mut err = None;
+                            egui::Grid::new("info_grid").show(ui, |ui| {
+                                ui.label("Mime");
+                                ui.code(mime);
+                                ui.end_row();
+                                ui.label("Arg string");
                                 ui.code(arg.display().to_string());
                                 ui.end_row();
-                            }
-                        });
-                        // TODO: Maybe better place for this code
-                        let content_w = ui.max_rect().width() as u32;
-                        if content_w > rw.size().x {
-                            // Some padding seems to be needed
-                            let new_w = content_w + 100;
-                            // TODO: Better limit than magic number
-                            if new_w <= 1280 {
-                                rw.recreate(
-                                    [new_w, 240],
-                                    "rusty-open",
-                                    Style::DEFAULT,
-                                    &Default::default(),
-                                );
-                                center_window(rw);
+                                let [k_enter, k_esc] = ui.input(|inp| {
+                                    [
+                                        inp.key_pressed(egui::Key::Enter),
+                                        inp.key_pressed(egui::Key::Escape),
+                                    ]
+                                });
+                                ui.label("Path to executable");
+                                ui.text_edit_singleline(&mut fallback_exec_string);
+                                if ui.button("✔ Run (Enter)").clicked() || k_enter {
+                                    err = Some(exec_command(
+                                        &fallback_exec_string,
+                                        &[arg.to_owned()],
+                                    ));
+                                }
+                                if ui.button("🗙 Cancel (Escape)").clicked() || k_esc {
+                                    rw.close();
+                                }
+                            });
+                            if let Some(e) = err {
+                                status = Status::ExecError(e);
                             }
                         }
-                        ui.separator();
-                        ui.vertical_centered(|ui| {
-                            let [k_enter, k_esc] = ui.input(|inp| {
-                                [
-                                    inp.key_pressed(egui::Key::Enter),
-                                    inp.key_pressed(egui::Key::Escape),
-                                ]
+                        Status::ExecError(err) => {
+                            ui.heading("Exec error");
+                            ui.code(err.to_string());
+                        }
+                        Status::PromptExec {
+                            arg,
+                            de,
+                            mime,
+                            appfile_path,
+                            to_exec,
+                            args,
+                        } => {
+                            let mut err = None;
+                            egui::Grid::new("info_grid").show(ui, |ui| {
+                                ui.label("xdg-open arg");
+                                ui.code(arg.display().to_string());
+                                ui.end_row();
+                                ui.label("Detected DE");
+                                ui.label(de_opt_str(*de));
+                                ui.end_row();
+                                ui.label("File mime type");
+                                ui.code(mime);
+                                ui.end_row();
+                                ui.label(".desktop file");
+                                ui.code(appfile_path.display().to_string());
+                                ui.end_row();
+                                ui.label("Executable");
+                                ui.code(to_exec);
+                                ui.end_row();
+                                ui.label("arguments");
+                                ui.end_row();
                             });
-                            if ui.button("✔ Run (Enter)").clicked() || k_enter {
-                                err = Some(exec_command(to_exec, args));
+                            ui.indent("args_indent", |ui| {
+                                for arg in args {
+                                    ui.code(arg.display().to_string());
+                                    ui.end_row();
+                                }
+                            });
+                            ui.separator();
+                            ui.vertical_centered(|ui| {
+                                let [k_enter, k_esc] = ui.input(|inp| {
+                                    [
+                                        inp.key_pressed(egui::Key::Enter),
+                                        inp.key_pressed(egui::Key::Escape),
+                                    ]
+                                });
+                                if ui.button("✔ Run (Enter)").clicked() || k_enter {
+                                    err = Some(exec_command(to_exec, args));
+                                }
+                                if ui.button("🗙 Cancel (Escape)").clicked() || k_esc {
+                                    rw.close();
+                                }
+                            });
+                            if let Some(e) = err {
+                                status = Status::ExecError(e);
                             }
-                            if ui.button("🗙 Cancel (Escape)").clicked() || k_esc {
-                                rw.close();
-                            }
-                        });
-                        if let Some(e) = err {
-                            status = Status::ExecError(e);
+                        }
+                    };
+                    let content_w = ui.max_rect().width() as u32;
+                    if content_w > rw.size().x {
+                        // Some padding seems to be needed
+                        let new_w = content_w + 100;
+                        // TODO: Better limit than magic number
+                        if new_w <= 1280 {
+                            rw.recreate(
+                                [new_w, 240],
+                                "rusty-open",
+                                Style::DEFAULT,
+                                &Default::default(),
+                            );
+                            center_window(rw);
                         }
                     }
                 });
