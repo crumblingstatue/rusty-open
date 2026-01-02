@@ -73,6 +73,7 @@ fn open(arg: &OsStr, de: Option<DesktopEnvironment>) -> Status {
             Err(err) => {
                 return Status::XdgQueryError {
                     arg: arg.to_owned(),
+                    extracted_path: None,
                     err,
                 };
             }
@@ -80,6 +81,11 @@ fn open(arg: &OsStr, de: Option<DesktopEnvironment>) -> Status {
     };
     // Special handling for `file://` URLs
     if mime == "x-scheme-handler/file" {
+        if url_path.contains('%') {
+            url_path = percent_encoding::percent_decode_str(&url_path)
+                .decode_utf8_lossy()
+                .into_owned()
+        }
         match de.query_mime(url_path.as_ref()) {
             Ok(path_mime) => {
                 mime = path_mime;
@@ -87,6 +93,7 @@ fn open(arg: &OsStr, de: Option<DesktopEnvironment>) -> Status {
             Err(err) => {
                 return Status::XdgQueryError {
                     arg: arg.to_owned(),
+                    extracted_path: Some(url_path),
                     err,
                 };
             }
@@ -103,6 +110,7 @@ fn open(arg: &OsStr, de: Option<DesktopEnvironment>) -> Status {
         Err(err) => {
             return Status::XdgQueryError {
                 arg: arg.to_owned(),
+                extracted_path: None,
                 err,
             };
         }
@@ -143,6 +151,7 @@ fn open(arg: &OsStr, de: Option<DesktopEnvironment>) -> Status {
             }
             Status::PromptExec {
                 arg: arg.into(),
+                extracted_path: (!url_path.is_empty()).then_some(url_path),
                 de,
                 mime,
                 appfile_path,
@@ -192,6 +201,8 @@ enum Status {
     NoArgs,
     XdgQueryError {
         arg: OsString,
+        // Extracted path from `file://` handling
+        extracted_path: Option<String>,
         err: XdgQueryError,
     },
     DesktopFileParseError(std::io::Error),
@@ -202,6 +213,8 @@ enum Status {
     },
     PromptExec {
         arg: OsString,
+        // Extracted path from `file://` handling
+        extracted_path: Option<String>,
         de: Option<DesktopEnvironment>,
         mime: String,
         appfile_path: PathBuf,
@@ -262,7 +275,11 @@ fn main() {
                                 }
                             });
                         }
-                        Status::XdgQueryError { arg, err } => {
+                        Status::XdgQueryError {
+                            arg,
+                            err,
+                            extracted_path,
+                        } => {
                             ui.vertical_centered(|ui| {
                                 ui.heading("XDG Query error");
 
@@ -270,6 +287,11 @@ fn main() {
                                     ui.label("xdg-open arg");
                                     ui.code(arg.display().to_string());
                                     ui.end_row();
+                                    if let Some(decoded) = extracted_path {
+                                        ui.label("Extracted path");
+                                        ui.code(decoded);
+                                        ui.end_row();
+                                    }
                                     ui.label("Error");
                                     ui.code(err.to_string());
                                 });
@@ -333,6 +355,7 @@ fn main() {
                         }
                         Status::PromptExec {
                             arg,
+                            extracted_path,
                             de,
                             mime,
                             appfile_path,
@@ -344,6 +367,11 @@ fn main() {
                                 ui.label("xdg-open arg");
                                 ui.code(arg.display().to_string());
                                 ui.end_row();
+                                if let Some(decoded) = extracted_path {
+                                    ui.label("Extracted path");
+                                    ui.code(decoded);
+                                    ui.end_row();
+                                }
                                 ui.label("Detected DE");
                                 ui.label(de_opt_str(*de));
                                 ui.end_row();

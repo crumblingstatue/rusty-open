@@ -788,6 +788,7 @@ dependencies = [
  "detect-desktop-environment",
  "dirs",
  "egui-sf2g",
+ "percent-encoding",
  "shlex",
  "thiserror",
  "url",
