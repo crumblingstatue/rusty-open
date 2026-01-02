@@ -188,8 +188,12 @@ enum Status {
 
 fn main() {
     let de = DesktopEnvironment::detect();
+    let default_w = 320;
+    let default_h = 80;
+    let mut current_w = default_w;
+    let mut current_h = default_h;
     let mut rw = RenderWindow::new(
-        (320, 240),
+        [default_w, default_h],
         "rusty-open",
         Style::DEFAULT,
         &Default::default(),
@@ -204,8 +208,6 @@ fn main() {
         status = open(&arg, de);
     }
     let mut fallback_exec_string = String::new();
-    let mut current_w = 320;
-    let mut current_h = 240;
     while rw.is_open() {
         while let Some(ev) = rw.poll_event() {
             sf_egui.add_event(&ev);
@@ -262,14 +264,16 @@ fn main() {
                                 ui.label("Arg string");
                                 ui.code(arg.display().to_string());
                                 ui.end_row();
+                                ui.label("Path to executable");
+                                ui.text_edit_singleline(&mut fallback_exec_string);
+                            });
+                            ui.vertical_centered(|ui| {
                                 let [k_enter, k_esc] = ui.input(|inp| {
                                     [
                                         inp.key_pressed(egui::Key::Enter),
                                         inp.key_pressed(egui::Key::Escape),
                                     ]
                                 });
-                                ui.label("Path to executable");
-                                ui.text_edit_singleline(&mut fallback_exec_string);
                                 if ui.button("✔ Run (Enter)").clicked() || k_enter {
                                     match spawn_command(&fallback_exec_string, &[arg.to_owned()]) {
                                         Ok(()) => {
