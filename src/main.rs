@@ -1,8 +1,17 @@
 use {
     detect_desktop_environment::DesktopEnvironment,
-    rfd::{MessageDialog, MessageDialogResult},
+    egui_sf2g::{
+        SfEgui,
+        egui::{self, FontId},
+        sf2g::{
+            graphics::{FloatRect, RenderTarget as _, RenderWindow, View},
+            system::Vector2,
+            window::{Event, Style, VideoMode},
+        },
+    },
     std::{
-        ffi::OsStr,
+        ffi::{OsStr, OsString},
+        os::unix::process::CommandExt,
         path::{Path, PathBuf},
         process::Command,
         str::Utf8Error,
@@ -12,8 +21,6 @@ use {
     xdg_desktop_file::{args_from_exec_string, parse_desktop_file},
 };
 
-#[macro_use]
-mod dbg_box;
 mod generic_xdg;
 mod qt_xdg;
 mod xdg_desktop_file;
@@ -55,13 +62,7 @@ fn fallback_default(mime: &str) -> Option<&'static str> {
     })
 }
 
-fn open_with(command: impl AsRef<OsStr>, args: &[impl AsRef<OsStr>]) {
-    if let Err(e) = Command::new(command).args(args).spawn() {
-        MessageDialog::new().set_description(format!("Error: {e}"));
-    }
-}
-
-fn open(arg: &OsStr, de: Option<DesktopEnvironment>) {
+fn open(arg: &OsStr, de: Option<DesktopEnvironment>) -> Status {
     let mut url_mime = None;
     if let Some(text) = arg.to_str()
         && let Ok(url) = Url::parse(text)
@@ -75,20 +76,16 @@ fn open(arg: &OsStr, de: Option<DesktopEnvironment>) {
         match de.query_mime(arg) {
             Ok(mime) => mime,
             Err(e) => {
-                MessageDialog::new()
-                    .set_description(format!("Error: {e}"))
-                    .show();
-                return;
+                return Status::XdgQueryError(e);
             }
         }
     };
     let default = match de.query_default(&mime) {
         Ok(def) => Some(def),
-        Err(XdgQueryError::InvalidUtf8(e)) => {
-            dbg_box!(e);
-            return;
-        }
         Err(XdgQueryError::Empty) => fallback_default(&mime).map(|s| s.to_string()),
+        Err(e) => {
+            return Status::XdgQueryError(e);
+        }
     };
     match default {
         Some(default) => {
@@ -108,13 +105,8 @@ fn open(arg: &OsStr, de: Option<DesktopEnvironment>) {
                             .join(&default);
                         match parse_desktop_file(&appfile_path) {
                             Ok(map) => map,
-                            Err(_) => {
-                                MessageDialog::new()
-                                    .set_description(format!(
-                                        "Could not find matching .desktop file for {default}"
-                                    ))
-                                    .show();
-                                return;
+                            Err(e) => {
+                                return Status::DesktopFileParseError(e);
                             }
                         }
                     }
@@ -125,44 +117,20 @@ fn open(arg: &OsStr, de: Option<DesktopEnvironment>) {
                         args = &parsed_args[..];
                         to_exec = &parsed_exec;
                     } else {
-                        MessageDialog::new()
-                            .set_description("Invalid Exec string")
-                            .show();
+                        return Status::InvalidExecString(exec.clone());
                     }
                 }
             }
-            let mut ok = true;
-            let msg = format!(
-                "Arg: {arg}\nDE: {de}\nMime: {mime}\nApp file: {appfile_path}\nExecutable: {to_exec}\nArgs: {args:?}",
-                arg = arg.to_string_lossy(),
-                appfile_path = appfile_path.display(),
-                de = de_opt_str(de),
-            );
-            if MessageDialog::new()
-                // rfd doesn't allow only setting window title, but this is better than an empty
-                // string being the window title.
-                // GTK can have confusing behavior sometimes, like not displaying labels if the string
-                // contains weird characters. Having rusty-open in the window title helps inform the user
-                // that indeed we are running rusty-open, even if the contents are empty for whatever reason.
-                .set_title("rusty-open")
-                .set_description(msg)
-                .set_buttons(rfd::MessageButtons::OkCancel)
-                .show()
-                == MessageDialogResult::Cancel
-            {
-                ok = false;
-            }
-            if ok {
-                open_with(to_exec, args);
+            Status::PromptExec {
+                arg: arg.into(),
+                de,
+                mime,
+                appfile_path,
+                to_exec: to_exec.clone(),
+                args: args.to_vec(),
             }
         }
-        None => {
-            MessageDialog::new()
-                .set_description(format!(
-                    "No default app could be determined for mime {mime}"
-                ))
-                .show();
-        }
+        None => Status::CouldntDetermineDefault { mime },
     }
 }
 
@@ -197,15 +165,197 @@ fn de_opt_str(de: Option<DesktopEnvironment>) -> &'static str {
     }
 }
 
+enum Status {
+    NoArgs,
+    XdgQueryError(XdgQueryError),
+    DesktopFileParseError(std::io::Error),
+    InvalidExecString(String),
+    CouldntDetermineDefault {
+        mime: String,
+    },
+    PromptExec {
+        arg: OsString,
+        de: Option<DesktopEnvironment>,
+        mime: String,
+        appfile_path: PathBuf,
+        to_exec: String,
+        args: Vec<OsString>,
+    },
+    ExecError(std::io::Error),
+}
+
 fn main() {
     let de = DesktopEnvironment::detect();
-    match std::env::args_os().nth(1) {
-        Some(arg) => open(&arg, de),
-        None => {
-            MessageDialog::new()
-                .set_title("Rusty-open")
-                .set_description("No arguments provided, nothing to open")
-                .show();
-        }
+    let mut rw = RenderWindow::new(
+        (320, 240),
+        "rusty-open",
+        Style::DEFAULT,
+        &Default::default(),
+    )
+    .unwrap();
+    center_window(&mut rw);
+    rw.set_framerate_limit(60);
+    let mut sf_egui = SfEgui::new(&rw);
+    set_up_style(&sf_egui);
+    let mut status = Status::NoArgs;
+    if let Some(arg) = std::env::args_os().nth(1) {
+        status = open(&arg, de);
     }
+    while rw.is_open() {
+        while let Some(ev) = rw.poll_event() {
+            sf_egui.add_event(&ev);
+            match ev {
+                Event::Closed => rw.close(),
+                Event::Resized { width, height } => {
+                    rw.set_view(
+                        &View::from_rect(FloatRect::new(0., 0., width as f32, height as f32))
+                            .unwrap(),
+                    );
+                }
+                _ => {}
+            }
+        }
+        let di = sf_egui
+            .run(&mut rw, |rw, ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| match &status {
+                    Status::NoArgs => {
+                        ui.label(format!("Rusty-open running on {}.", de_opt_str(de)));
+                        ui.label("No arguments provided. Nothing to do.");
+                        ui.vertical_centered(|ui| {
+                            if ui.button("Okay then").clicked() {
+                                rw.close();
+                            }
+                        });
+                    }
+                    Status::XdgQueryError(xdg_query_error) => {
+                        ui.vertical_centered(|ui| {
+                            ui.heading("XDG Query error");
+                            ui.label(format!("{xdg_query_error}"));
+                            if ui.button("Ok").clicked() {
+                                rw.close();
+                            }
+                        });
+                    }
+                    Status::DesktopFileParseError(error) => {
+                        ui.heading("Desktop file parse error");
+                        ui.code(error.to_string());
+                    }
+                    Status::InvalidExecString(s) => {
+                        ui.heading("Invalid exec string");
+                        ui.code(s);
+                    }
+                    Status::CouldntDetermineDefault { mime } => {
+                        ui.heading("Couldn't determine default for mime");
+                        ui.code(mime);
+                    }
+                    Status::ExecError(err) => {
+                        ui.heading("Exec error");
+                        ui.code(err.to_string());
+                    }
+                    Status::PromptExec {
+                        arg,
+                        de,
+                        mime,
+                        appfile_path,
+                        to_exec,
+                        args,
+                    } => {
+                        let mut err = None;
+                        egui::Grid::new("info_grid").show(ui, |ui| {
+                            ui.label("xdg-open arg");
+                            ui.code(arg.display().to_string());
+                            ui.end_row();
+                            ui.label("Detected DE");
+                            ui.label(de_opt_str(*de));
+                            ui.end_row();
+                            ui.label("File mime type");
+                            ui.code(mime);
+                            ui.end_row();
+                            ui.label(".desktop file");
+                            ui.code(appfile_path.display().to_string());
+                            ui.end_row();
+                            ui.label("Executable");
+                            ui.code(to_exec);
+                            ui.end_row();
+                            ui.label("arguments");
+                            ui.end_row();
+                        });
+                        ui.indent("args_indent", |ui| {
+                            for arg in args {
+                                ui.code(arg.display().to_string());
+                                ui.end_row();
+                            }
+                        });
+                        // TODO: Maybe better place for this code
+                        let content_w = ui.max_rect().width() as u32;
+                        if content_w > rw.size().x {
+                            // Some padding seems to be needed
+                            let new_w = content_w + 100;
+                            // TODO: Better limit than magic number
+                            if new_w <= 1280 {
+                                rw.recreate(
+                                    [new_w, 240],
+                                    "rusty-open",
+                                    Style::DEFAULT,
+                                    &Default::default(),
+                                );
+                                center_window(rw);
+                            }
+                        }
+                        ui.separator();
+                        ui.vertical_centered(|ui| {
+                            let [k_enter, k_esc] = ui.input(|inp| {
+                                [
+                                    inp.key_pressed(egui::Key::Enter),
+                                    inp.key_pressed(egui::Key::Escape),
+                                ]
+                            });
+                            if ui.button("✔ Run (Enter)").clicked() || k_enter {
+                                err = Some(exec_command(to_exec, args));
+                            }
+                            if ui.button("🗙 Cancel (Escape)").clicked() || k_esc {
+                                rw.close();
+                            }
+                        });
+                        if let Some(e) = err {
+                            status = Status::ExecError(e);
+                        }
+                    }
+                });
+            })
+            .unwrap();
+        sf_egui.draw(di, &mut rw, None);
+        rw.display();
+    }
+}
+
+fn set_up_style(sf_egui: &SfEgui) {
+    sf_egui.context().style_mut(|style| {
+        style.text_styles.insert(
+            egui::TextStyle::Body,
+            FontId::new(16.0, egui::FontFamily::Proportional),
+        );
+        style.text_styles.insert(
+            egui::TextStyle::Button,
+            FontId::new(16.0, egui::FontFamily::Proportional),
+        );
+        style.text_styles.insert(
+            egui::TextStyle::Monospace,
+            FontId::new(16.0, egui::FontFamily::Monospace),
+        );
+    });
+}
+
+fn exec_command(cmd: &str, args: &[OsString]) -> std::io::Error {
+    Command::new(cmd).args(args).exec()
+}
+
+fn center_window(rw: &mut RenderWindow) {
+    let Vector2 { x, y } = rw.size();
+    let desktop_mode = VideoMode::desktop_mode();
+    let width_diff = desktop_mode.width - x;
+    let height_diff = desktop_mode.height - y;
+    let new_x = width_diff / 2;
+    let new_y = height_diff / 2;
+    rw.set_position(Vector2::new(new_x as i32, new_y as i32));
 }
