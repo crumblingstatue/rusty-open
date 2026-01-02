@@ -11,7 +11,9 @@ use {
             window::{Event, Style, VideoMode},
         },
     },
+    icon::Icons,
     std::{
+        borrow::Cow,
         ffi::{OsStr, OsString},
         path::{Path, PathBuf},
         process::Command,
@@ -117,6 +119,7 @@ fn open(arg: &OsStr, de: Option<DesktopEnvironment>) -> Status {
     };
     match default {
         Some(default) => {
+            let mut icon_path = None;
             let mut args = &[arg.to_owned()][..];
             let mut to_exec = &default;
             let parsed_args;
@@ -148,10 +151,16 @@ fn open(arg: &OsStr, de: Option<DesktopEnvironment>) -> Status {
                         return Status::InvalidExecString(exec.clone());
                     }
                 }
+                if let Some(icon) = desktop_map.get("Icon") {
+                    if let Some(icon) = Icons::new().find_default_icon(icon, 64, 1) {
+                        icon_path = Some(icon.path().to_str().unwrap().to_owned());
+                    }
+                }
             }
             Status::PromptExec {
                 arg: arg.into(),
                 extracted_path: (!url_path.is_empty()).then_some(url_path),
+                icon_path,
                 de,
                 mime,
                 appfile_path,
@@ -220,6 +229,8 @@ enum Status {
         appfile_path: PathBuf,
         to_exec: String,
         args: Vec<OsString>,
+        // Path of the `.desktop` icon of the application, if any
+        icon_path: Option<String>,
     },
     ExecError(std::io::Error),
 }
@@ -241,6 +252,7 @@ fn main() {
     rw.set_vertical_sync_enabled(true);
     let mut sf_egui = SfEgui::new(&rw);
     set_up_style(&sf_egui);
+    egui_extras::install_image_loaders(sf_egui.context());
     let mut status = Status::NoArgs;
     if let Some(arg) = std::env::args_os().nth(1) {
         status = open(&arg, de);
@@ -361,6 +373,7 @@ fn main() {
                             appfile_path,
                             to_exec,
                             args,
+                            icon_path,
                         } => {
                             let mut err = None;
                             egui::Grid::new("info_grid").show(ui, |ui| {
@@ -382,7 +395,15 @@ fn main() {
                                 ui.code(appfile_path.display().to_string());
                                 ui.end_row();
                                 ui.label("Executable");
-                                ui.code(to_exec);
+                                if let Some(icon_path) = icon_path {
+                                    let image = egui::Image::new(egui::ImageSource::Uri(
+                                        Cow::Owned(format!("file://{icon_path}")),
+                                    ))
+                                    .fit_to_original_size(1.0);
+                                    ui.selectable_label(false, (image, to_exec));
+                                } else {
+                                    ui.code(to_exec);
+                                }
                                 ui.end_row();
                                 ui.label("arguments");
                                 ui.end_row();
