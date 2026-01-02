@@ -139,6 +139,12 @@ fn open(arg: &OsStr, de: Option<DesktopEnvironment>) {
                 de = de_opt_str(de),
             );
             if MessageDialog::new()
+                // rfd doesn't allow only setting window title, but this is better than an empty
+                // string being the window title.
+                // GTK can have confusing behavior sometimes, like not displaying labels if the string
+                // contains weird characters. Having rusty-open in the window title helps inform the user
+                // that indeed we are running rusty-open, even if the contents are empty for whatever reason.
+                .set_title("rusty-open")
                 .set_description(msg)
                 .set_buttons(rfd::MessageButtons::OkCancel)
                 .show()
