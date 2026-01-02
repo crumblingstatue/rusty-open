@@ -70,8 +70,11 @@ fn open(arg: &OsStr, de: Option<DesktopEnvironment>) -> Status {
     } else {
         match de.query_mime(arg) {
             Ok(mime) => mime,
-            Err(e) => {
-                return Status::XdgQueryError(e);
+            Err(err) => {
+                return Status::XdgQueryError {
+                    arg: arg.to_owned(),
+                    err,
+                };
             }
         }
     };
@@ -81,8 +84,11 @@ fn open(arg: &OsStr, de: Option<DesktopEnvironment>) -> Status {
             Ok(path_mime) => {
                 mime = path_mime;
             }
-            Err(e) => {
-                return Status::XdgQueryError(e);
+            Err(err) => {
+                return Status::XdgQueryError {
+                    arg: arg.to_owned(),
+                    err,
+                };
             }
         }
     }
@@ -94,8 +100,11 @@ fn open(arg: &OsStr, de: Option<DesktopEnvironment>) -> Status {
                 mime,
             };
         }
-        Err(e) => {
-            return Status::XdgQueryError(e);
+        Err(err) => {
+            return Status::XdgQueryError {
+                arg: arg.to_owned(),
+                err,
+            };
         }
     };
     match default {
@@ -181,7 +190,10 @@ fn de_opt_str(de: Option<DesktopEnvironment>) -> &'static str {
 
 enum Status {
     NoArgs,
-    XdgQueryError(XdgQueryError),
+    XdgQueryError {
+        arg: OsString,
+        err: XdgQueryError,
+    },
     DesktopFileParseError(std::io::Error),
     InvalidExecString(String),
     CouldntDetermineDefault {
@@ -250,13 +262,22 @@ fn main() {
                                 }
                             });
                         }
-                        Status::XdgQueryError(xdg_query_error) => {
+                        Status::XdgQueryError { arg, err } => {
                             ui.vertical_centered(|ui| {
                                 ui.heading("XDG Query error");
-                                ui.label(format!("{xdg_query_error}"));
-                                if ui.button("Ok").clicked() {
-                                    rw.close();
-                                }
+
+                                egui::Grid::new("info_grid").show(ui, |ui| {
+                                    ui.label("xdg-open arg");
+                                    ui.code(arg.display().to_string());
+                                    ui.end_row();
+                                    ui.label("Error");
+                                    ui.code(err.to_string());
+                                });
+                                ui.vertical_centered(|ui| {
+                                    if ui.button("Ok").clicked() {
+                                        rw.close();
+                                    }
+                                });
                             });
                         }
                         Status::DesktopFileParseError(error) => {
