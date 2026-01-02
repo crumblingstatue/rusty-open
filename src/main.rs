@@ -1,17 +1,18 @@
+#![allow(clippy::collapsible_if)]
+
 use {
     detect_desktop_environment::DesktopEnvironment,
     egui_sf2g::{
         SfEgui,
         egui::{self, FontId},
         sf2g::{
-            graphics::{FloatRect, RenderTarget as _, RenderWindow, View},
+            graphics::{FloatRect, RenderTarget, RenderWindow, View},
             system::Vector2,
             window::{Event, Style, VideoMode},
         },
     },
     std::{
         ffi::{OsStr, OsString},
-        os::unix::process::CommandExt,
         path::{Path, PathBuf},
         process::Command,
         str::Utf8Error,
@@ -195,7 +196,7 @@ fn main() {
     )
     .unwrap();
     center_window(&mut rw);
-    rw.set_framerate_limit(60);
+    rw.set_vertical_sync_enabled(true);
     let mut sf_egui = SfEgui::new(&rw);
     set_up_style(&sf_egui);
     let mut status = Status::NoArgs;
@@ -203,12 +204,16 @@ fn main() {
         status = open(&arg, de);
     }
     let mut fallback_exec_string = String::new();
+    let mut current_w = 320;
+    let mut current_h = 240;
     while rw.is_open() {
         while let Some(ev) = rw.poll_event() {
             sf_egui.add_event(&ev);
             match ev {
                 Event::Closed => rw.close(),
                 Event::Resized { width, height } => {
+                    current_w = width;
+                    current_h = height;
                     rw.set_view(
                         &View::from_rect(FloatRect::new(0., 0., width as f32, height as f32))
                             .unwrap(),
@@ -266,10 +271,15 @@ fn main() {
                                 ui.label("Path to executable");
                                 ui.text_edit_singleline(&mut fallback_exec_string);
                                 if ui.button("✔ Run (Enter)").clicked() || k_enter {
-                                    err = Some(exec_command(
-                                        &fallback_exec_string,
-                                        &[arg.to_owned()],
-                                    ));
+                                    match spawn_command(&fallback_exec_string, &[arg.to_owned()]) {
+                                        Ok(()) => {
+                                            rw.close();
+                                            return;
+                                        }
+                                        Err(e) => {
+                                            err = Some(e);
+                                        }
+                                    }
                                 }
                                 if ui.button("🗙 Cancel (Escape)").clicked() || k_esc {
                                     rw.close();
@@ -326,7 +336,15 @@ fn main() {
                                     ]
                                 });
                                 if ui.button("✔ Run (Enter)").clicked() || k_enter {
-                                    err = Some(exec_command(to_exec, args));
+                                    match spawn_command(to_exec, args) {
+                                        Ok(()) => {
+                                            rw.close();
+                                            return;
+                                        }
+                                        Err(e) => {
+                                            err = Some(e);
+                                        }
+                                    }
                                 }
                                 if ui.button("🗙 Cancel (Escape)").clicked() || k_esc {
                                     rw.close();
@@ -337,18 +355,22 @@ fn main() {
                             }
                         }
                     };
-                    let content_w = ui.max_rect().width() as u32;
-                    if content_w > rw.size().x {
-                        // Some padding seems to be needed
-                        let new_w = content_w + 100;
+                    let ui_rect = ui.max_rect();
+                    let content_w = ui_rect.width() as u32;
+                    let content_h = ui_rect.height() as u32;
+                    if content_w > current_w || content_h > current_h {
+                        // Some horizontal padding seems to be needed
+                        let new_w = content_w + 24;
+                        let new_h = content_h;
                         // TODO: Better limit than magic number
-                        if new_w <= 1280 {
+                        if new_w < 1280 {
                             rw.recreate(
-                                [new_w, 240],
+                                [new_w, new_h],
                                 "rusty-open",
                                 Style::DEFAULT,
                                 &Default::default(),
                             );
+                            rw.set_vertical_sync_enabled(true);
                             center_window(rw);
                         }
                     }
@@ -377,8 +399,8 @@ fn set_up_style(sf_egui: &SfEgui) {
     });
 }
 
-fn exec_command(cmd: &str, args: &[OsString]) -> std::io::Error {
-    Command::new(cmd).args(args).exec()
+fn spawn_command(cmd: &str, args: &[OsString]) -> std::io::Result<()> {
+    Command::new(cmd).args(args).spawn().map(|_| ())
 }
 
 fn center_window(rw: &mut RenderWindow) {
