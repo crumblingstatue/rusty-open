@@ -101,6 +101,16 @@ fn open(arg: &OsStr, de: Option<DesktopEnvironment>) -> Status {
             }
         }
     }
+    let icons = Icons::new();
+    // TODO: Detect icon theme rather than hardcoding `breeze`
+    let theme = icons.theme("breeze").unwrap();
+    // TODO: Is this enough to convert mime to icon name?
+    let icon_name = mime.replace('/', "-");
+    let mut mime_icon_path = None;
+    if let Some(ico) = theme.find_icon(&icon_name, 64, 1) {
+        mime_icon_path = Some(ico.path().to_str().unwrap().to_owned());
+    }
+
     let default = match de.query_default(&mime) {
         Ok(def) => Some(def),
         Err(XdgQueryError::Empty) => {
@@ -166,6 +176,7 @@ fn open(arg: &OsStr, de: Option<DesktopEnvironment>) -> Status {
                 appfile_path,
                 to_exec: to_exec.clone(),
                 args: args.to_vec(),
+                mime_icon_path,
             }
         }
         None => Status::CouldntDetermineDefault {
@@ -231,6 +242,8 @@ enum Status {
         args: Vec<OsString>,
         // Path of the `.desktop` icon of the application, if any
         icon_path: Option<String>,
+        // Path of the icon of the detected mime type, if any
+        mime_icon_path: Option<String>,
     },
     ExecError(std::io::Error),
 }
@@ -374,6 +387,7 @@ fn main() {
                             to_exec,
                             args,
                             icon_path,
+                            mime_icon_path,
                         } => {
                             let mut err = None;
                             egui::Grid::new("info_grid").show(ui, |ui| {
@@ -388,8 +402,16 @@ fn main() {
                                 ui.label("Detected DE");
                                 ui.label(de_opt_str(*de));
                                 ui.end_row();
-                                ui.label("File mime type");
-                                ui.code(mime);
+                                ui.label("Mime type");
+                                if let Some(icon_path) = mime_icon_path {
+                                    let image = egui::Image::new(egui::ImageSource::Uri(
+                                        Cow::Owned(format!("file://{icon_path}")),
+                                    ))
+                                    .fit_to_original_size(1.0);
+                                    ui.selectable_label(false, (image, mime));
+                                } else {
+                                    ui.code(mime);
+                                }
                                 ui.end_row();
                                 ui.label(".desktop file");
                                 ui.code(appfile_path.display().to_string());
